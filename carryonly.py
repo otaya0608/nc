@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+# carryonly.py - 基本的な移動と通信のクラス
 from collections import defaultdict
 import math
 from perlcompat import die
@@ -25,14 +27,9 @@ class CarryOnly():
         self.rx_count = 0
         self.dup_count = 0
 
-        # ▼▼▼ ゾンビ用カスタム ▼▼▼
-        self.state = 'S'
-        self.color = 'blue' 
-        self.time_infected = None
-        self.time_recovered = None
-
         self.scheduler.add_agent(self)
 
+    # ゾンビ化などの拡張用に空のメソッドを用意しておく
     def update_color(self):
         pass
 
@@ -51,6 +48,7 @@ class CarryOnly():
         i, j = self.zone()
         self.scheduler.zone_cache.setdefault(j, {}).setdefault(i, []).append(self)
 
+    # 【重要】ここにバグがないよう、距離判定を正確に行う
     def neighbors(self):
         cache = self.scheduler.zone_cache
         if not cache: die("update_zone() must have been called for zone caching.")
@@ -66,7 +64,9 @@ class CarryOnly():
                 for agent in self.scheduler.zone_cache[j + dj][i + di]:
                     if agent == self: continue
                     q = agent.mobility.current
+                    # 簡易判定
                     if abs(p[0]-q[0])>self.range_ or abs(p[1]-q[1])>self.range_: continue
+                    # 精密判定 (円の中に入っているか)
                     if math.sqrt((p[0]-q[0])**2+(p[1]-q[1])**2) > self.range_: continue
                     neighbors.append(agent)
         return neighbors
@@ -90,13 +90,14 @@ class CarryOnly():
         self.receive_queue[msg] += 1
         self.rx_count += 1
         if msg in self.received: self.dup_count += 1
-        self.update_color() # 色更新
+        self.update_color() # 拡張クラスで色が定義されていれば色が変わる
         self.monitor.change_agent_status(self)
 
     def messages(self): return [msg for msg in self.received if self.received[msg] > 0]
     def pending_messages(self): return [msg for msg in self.messages() if self.msg_dst(msg) != self.id_ and msg not in self.delivered]
     def accepted_messages(self): return [msg for msg in self.messages() if self.msg_dst(msg) == self.id_]
 
+    # 基本のCarryOnlyは「目的地」にしか送らない
     def forward(self):
         encounters = self.encounters()
         for agent in encounters:
