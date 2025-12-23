@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-# epidemic.py - SIR（初期感染あり・完全版）
+# epidemic.py - SIR（初期表示修正版）
 import random
 from dtnsim.agent.carryonly import CarryOnly
 
 class Epidemic(CarryOnly):
-    INFECTION_RATE = 1.0   # 接触したら必ず感染
+    INFECTION_RATE = 1.0
 
     INFECT_TIME = 3.0     # 赤(I) → 緑(R)
     IMMUNE_TIME = 5.0     # 緑(R) → 青(S)
@@ -16,16 +16,19 @@ class Epidemic(CarryOnly):
         self.state = 'S'
         self.time_state_changed = None
 
-        # =========================
+        # -------------------------
         # 最初の1人を感染者にする
-        # =========================
+        # -------------------------
         if self.id_ == 1:
             self.state = 'I'
             self.time_state_changed = self.scheduler.time
 
-            # ★ 重要：最初からウイルスを1個持たせる
+            # 最初からウイルスを保持
             dummy = f"{self.id_}-0-9999"
             self.received[dummy] += 1
+
+        # ★超重要：初期状態の色を強制反映
+        self.monitor.change_agent_status(self)
 
     def update_state(self, new_state):
         self.state = new_state
@@ -62,13 +65,12 @@ class Epidemic(CarryOnly):
                 self.update_state('S')
                 return
 
-        # ---------- 感染行動（赤のみ） ----------
+        # ---------- 感染行動 ----------
         if self.state != 'I':
             return
 
         viruses = self.messages()
         if not viruses:
-            # 念のための保険（通常は初期化で入っている）
             dummy = f"{self.id_}-0-9999"
             self.received[dummy] += 1
             viruses = [dummy]
