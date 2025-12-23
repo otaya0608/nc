@@ -1,38 +1,44 @@
 #!/usr/bin/env python3
-# epidemic.py - SIR（初期表示修正版）
 import random
 from dtnsim.agent.carryonly import CarryOnly
 
 class Epidemic(CarryOnly):
-    INFECTION_RATE = 1.0
 
-    INFECT_TIME = 3.0     # 赤(I) → 緑(R)
-    IMMUNE_TIME = 5.0     # 緑(R) → 青(S)
+    INFECT_TIME = 3.0
+    IMMUNE_TIME = 5.0
+    INFECTION_RATE = 1.0
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
         # 状態: S / I / R
         self.state = 'S'
+        self.status = 0   # ← Cellが見るのはこれ
         self.time_state_changed = None
 
-        # -------------------------
         # 最初の1人を感染者にする
-        # -------------------------
         if self.id_ == 1:
             self.state = 'I'
+            self.status = 1
             self.time_state_changed = self.scheduler.time
 
-            # 最初からウイルスを保持
             dummy = f"{self.id_}-0-9999"
             self.received[dummy] += 1
 
-        # ★超重要：初期状態の色を強制反映
+        # ★ 初期描画を強制
         self.monitor.change_agent_status(self)
 
     def update_state(self, new_state):
         self.state = new_state
         self.time_state_changed = self.scheduler.time
+
+        if new_state == 'S':
+            self.status = 0
+        elif new_state == 'I':
+            self.status = 1
+        elif new_state == 'R':
+            self.status = 2
+
         self.monitor.change_agent_status(self)
 
     def recvmsg(self, agent, msg):
@@ -47,14 +53,14 @@ class Epidemic(CarryOnly):
             if agent.id_ == self.id_:
                 continue
             q = agent.mobility.current
-            if (p[0] - q[0])**2 + (p[1] - q[1])**2 <= self.range_**2:
+            if (p[0]-q[0])**2 + (p[1]-q[1])**2 <= self.range_**2:
                 neighbors.append(agent)
         return neighbors
 
     def forward(self):
         now = self.scheduler.time
 
-        # ---------- 状態遷移 ----------
+        # 状態遷移
         if self.state == 'I':
             if now - self.time_state_changed >= self.INFECT_TIME:
                 self.update_state('R')
@@ -65,7 +71,6 @@ class Epidemic(CarryOnly):
                 self.update_state('S')
                 return
 
-        # ---------- 感染行動 ----------
         if self.state != 'I':
             return
 
