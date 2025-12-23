@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# epidemic.py - 循環型感染モデル (S -> I -> R -> S)
+# epidemic.py
 import random
 import sys
 from dtnsim.agent.carryonly import CarryOnly
@@ -7,52 +7,57 @@ from dtnsim.agent.carryonly import CarryOnly
 class Epidemic(CarryOnly):
     # --- 設定（秒数） ---
     INFECTION_RATE = 1.0       # 感染確率
-    DURATION_INFECTED = 3.0    # 感染(赤)している時間 (3秒)
-    DURATION_IMMUNE = 5.0      # 免疫(緑)でいる時間 (5秒)
+    DURATION_INFECTED = 3.0    # 感染(赤)している時間
+    DURATION_IMMUNE = 5.0      # 免疫(緑)でいる時間
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         
-        # 初期状態: 健康(S), 青色
-        self.state = 'S'
-        self.color = 'blue'
-        self.time_state_changed = 0  # 状態が変わった時刻を記録
-
-        # ★ IDが1番のエージェントを「最初の感染者」にする
-        if self.id_ == 1:
-            self.update_state('I', 0) # 時刻0で感染
-            # print(f"DEBUG: Agent {self.id_} starts as INFECTED", file=sys.stderr)
-
-    def update_state(self, new_state, current_time):
-        """状態を更新し、色を変更してモニターに通知する"""
-        self.state = new_state
-        self.time_state_changed = current_time
+        # 変数の初期化だけを行う（ここでは self.monitor を呼ばない！）
+        self.time_state_changed = 0
         
-        # --- 色の設定（黒背景用） ---
-        if new_state == 'S':
-            self.color = 'blue'    # 健康：青
-        elif new_state == 'I':
+        # IDが1番のエージェントは最初から感染状態（赤）に設定しておく
+        if self.id_ == 1:
+            self.state = 'I'
+            self.color = 'red'
+            self.time_state_changed = 0
+        else:
+            self.state = 'S'
+            self.color = 'blue' # 背景が黒なら cyan 推奨だが、一旦 blue
+            
+    def update_visual(self):
+        """色を決めてモニターに通知する安全なメソッド"""
+        # 状態に合わせて色変数をセット
+        if self.state == 'S':
+            self.color = 'cyan'    # 健康：シアン（青）
+        elif self.state == 'I':
             self.color = 'red'     # 感染：赤
-        elif new_state == 'R':
-            self.color = 'lime'    # 免疫：緑（limeの方が黒背景で見やすい）
+        elif self.state == 'R':
+            self.color = 'lime'    # 免疫：緑（ライム）
 
-        # モニターに通知（色が即座に変わる）
-        if hasattr(self, 'monitor'):
-            self.monitor.change_agent_status(self)
+        # モニターが存在する場合のみ通知（エラー落ち防止）
+        if hasattr(self, 'monitor') and self.monitor:
+            try:
+                self.monitor.change_agent_status(self)
+            except:
+                pass # 描画エラーで止まるのを防ぐ
 
     def recvmsg(self, agent, msg):
-        """他者からメッセージ（ウイルス）を受け取った時の処理"""
         super().recvmsg(agent, msg)
         
         # 健康(S)のときだけ感染する
-        # 免疫(R)や既に感染(I)のときは無視する
         if self.state == 'S':
-            self.update_state('I', self.scheduler.time)
+            self.state = 'I'
+            self.time_state_changed = self.scheduler.time
+            self.update_visual() # 即座に色を変える
 
     def get_all_neighbors(self):
-        """通信範囲内にいる他のエージェントを取得"""
         neighbors = []
         p = self.mobility.current
+        # scheduler.agents が存在するか確認
+        if not hasattr(self.scheduler, 'agents'):
+            return []
+            
         for agent in self.scheduler.agents:
             if agent.id_ == self.id_: continue
             q = agent.mobility.current
@@ -62,54 +67,63 @@ class Epidemic(CarryOnly):
         return neighbors
 
     def forward(self):
-        """毎ステップ実行されるメインロジック"""
         current_time = self.scheduler.time
 
-        # --- 1. 時間経過による状態変化 ---
-        
-        # 感染(I) -> 3秒経過 -> 免疫(R)
-        if self.state == 'I':
-            if (current_time - self.time_state_changed) >= self.DURATION_INFECTED:
-                self.update_state('R', current_time)
-                return # 変化したターンは感染活動しない
+        # --- 0. 初回フレームの同期（重要） ---
+        # シミュレーション開始直後に一度だけ色を確定させる処理
+        # これがないと最初の感染者が青色のままになる可能性がある
+        if current_time <= self.scheduler.delta and self.state == 'I':
+            self.update_visual()
 
-        # 免疫(R) -> 5秒経過 -> 健康(S)
+        # --- 1. 時間経過による状態変化 ---
+        if self.state == 'I':
+            # 感染して3秒経ったら -> 免疫(R)
+            if (current_time - self.time_state_changed) >= self.DURATION_INFECTED:
+                self.state = 'R'
+                self.time_state_changed = current_time
+                self.update_visual()
+                return 
+
         elif self.state == 'R':
+            # 免疫になって5秒経ったら -> 健康(S)
             if (current_time - self.time_state_changed) >= self.DURATION_IMMUNE:
-                self.update_state('S', current_time)
+                self.state = 'S'
+                self.time_state_changed = current_time
+                self.update_visual()
                 return
 
-        # --- 2. 感染活動（自分が感染者の場合のみ） ---
+        # --- 2. 感染活動 ---
+        # 自分が感染者(I)でなければ何もしない
         if self.state != 'I':
             return
 
-        # ウイルス（メッセージ）の準備
         viruses = self.messages()
         if not viruses:
-            # ウイルスを持っていない場合（最初の感染者など）は生成
+            # ウイルス生成
             dummy = f"{self.id_}-virus"
             self.received[dummy] += 1
             viruses = [dummy]
 
-        # 近くにいる人を探す
+        # 近くの人を探して感染させる
         targets = self.get_all_neighbors()
-
-        # ばら撒く
         for agent in targets:
-            # 相手が免疫(R)ならスキップ（感染しない）
+            # 相手が免疫(R)ならスキップ
             if hasattr(agent, 'state') and agent.state == 'R':
                 continue
             
-            # 確率で感染させる
             if random.random() < self.INFECTION_RATE:
                 for msg in viruses:
                     if msg not in agent.received:
                         self.sendmsg(agent, msg)
 
     def advance(self):
-        """時間の進行"""
         self.mobility.move(self.scheduler.delta)
-        # 移動をモニターに通知
-        if hasattr(self, 'monitor'):
-            self.monitor.move_agent(self)
+        
+        # 移動描画
+        if hasattr(self, 'monitor') and self.monitor:
+            try:
+                self.monitor.move_agent(self)
+            except:
+                pass
+                
         self.forward()
