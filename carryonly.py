@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# carryonly.py - 基本的な移動と通信のクラス
+# carryonly.py (基本機能版)
 from collections import defaultdict
 import math
 from perlcompat import die
@@ -29,7 +29,7 @@ class CarryOnly():
 
         self.scheduler.add_agent(self)
 
-    # ゾンビ化などの拡張用に空のメソッドを用意しておく
+    # ゾンビ機能で上書きするための空メソッド
     def update_color(self):
         pass
 
@@ -48,7 +48,7 @@ class CarryOnly():
         i, j = self.zone()
         self.scheduler.zone_cache.setdefault(j, {}).setdefault(i, []).append(self)
 
-    # 【重要】ここにバグがないよう、距離判定を正確に行う
+    # 確実に周囲を検知できるように修正した neighbors
     def neighbors(self):
         cache = self.scheduler.zone_cache
         if not cache: die("update_zone() must have been called for zone caching.")
@@ -64,19 +64,16 @@ class CarryOnly():
                 for agent in self.scheduler.zone_cache[j + dj][i + di]:
                     if agent == self: continue
                     q = agent.mobility.current
-                    # 簡易判定
-                    if abs(p[0]-q[0])>self.range_ or abs(p[1]-q[1])>self.range_: continue
-                    # 精密判定 (円の中に入っているか)
-                    if math.sqrt((p[0]-q[0])**2+(p[1]-q[1])**2) > self.range_: continue
-                    neighbors.append(agent)
+                    if (p[0]-q[0])**2 + (p[1]-q[1])**2 <= self.range_**2:
+                        neighbors.append(agent)
         return neighbors
 
     def encounters(self):
         neighbors = self.neighbors()
         encounters = {agent.id_: agent for agent in neighbors}
         for agent in self.last_neighbors:
-            try: del encounters[agent.id_]
-            except KeyError: pass
+            if agent.id_ in encounters:
+                del encounters[agent.id_]
         self.last_neighbors = neighbors
         return list(encounters.values())
 
@@ -90,15 +87,14 @@ class CarryOnly():
         self.receive_queue[msg] += 1
         self.rx_count += 1
         if msg in self.received: self.dup_count += 1
-        self.update_color() # 拡張クラスで色が定義されていれば色が変わる
         self.monitor.change_agent_status(self)
+        self.update_color() # 色更新フック
 
     def messages(self): return [msg for msg in self.received if self.received[msg] > 0]
     def pending_messages(self): return [msg for msg in self.messages() if self.msg_dst(msg) != self.id_ and msg not in self.delivered]
-    def accepted_messages(self): return [msg for msg in self.messages() if self.msg_dst(msg) == self.id_]
 
-    # 基本のCarryOnlyは「目的地」にしか送らない
     def forward(self):
+        # 標準的なCarryOnlyの動作（Epidemic側で完全に上書きする）
         encounters = self.encounters()
         for agent in encounters:
             for msg in self.pending_messages():
