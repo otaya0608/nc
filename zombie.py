@@ -1,10 +1,19 @@
 import random
-# ★ここが重要！システムではなく、さっき作った自分のファイルを読む
-from carryonly import CarryOnly 
+# システムの正規のCarryOnlyを使う
+from dtnsim.agent.carryonly import CarryOnly
 
 class Zombie(CarryOnly):
+    # ▼ 設定 ▼
     INFECTION_RATE = 0.8
     RECOVERY_TIME = 100.0
+
+    # ▼ ここが重要！自分で初期化する（親に頼らない） ▼
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.state = 'S'
+        self.color = 'blue'
+        self.time_infected = None
+        self.time_recovered = None
 
     def update_color(self):
         if self.state == 'S': self.color = 'blue'
@@ -21,11 +30,16 @@ class Zombie(CarryOnly):
                 self.monitor.change_agent_status(self)
 
     def recvmsg(self, agent, msg):
+        # 親の受信処理（カウントなど）
         super().recvmsg(agent, msg)
+        
+        # 感染処理
         if self.state == 'S':
             self.state = 'I'
             self.time_infected = self.scheduler.time
             self.update_color()
+            # 色が変わったことを画面に通知
+            self.monitor.change_agent_status(self)
 
     def forward(self):
         self.check_recovery()
@@ -36,7 +50,9 @@ class Zombie(CarryOnly):
         if not viruses: return
 
         for agent in encounters:
+            # 相手もZombieクラスだと仮定
             if hasattr(agent, 'state') and agent.state == 'R': continue
+            
             if random.random() < self.INFECTION_RATE:
                 for msg in viruses:
                     self.sendmsg(agent, msg)
