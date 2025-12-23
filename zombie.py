@@ -1,80 +1,103 @@
 #!/usr/bin/env python3
-# epidemic.py - SIR（時間付き）版
-import random
-import sys
-from dtnsim.agent.carryonly import CarryOnly
+# cell.py - SIR対応 完全版
+from dtnsim.monitor.null import Null
 
-class Epidemic(CarryOnly):
-    INFECTION_RATE = 1.0
+def float2str(v, fmt='9.3f'):
+    astr = ('%' + fmt) % v
+    astr = astr.replace(' ', '__')
+    return astr
 
-    INFECT_TIME = 3.0   # 赤(I) → 緑(R) まで（秒）
-    IMMUNE_TIME = 5.0   # 緑(R) → 青(S) まで（秒）
+def to_geometry(v):
+    return v / 1000
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+class Cell(Null):
+    def open(self):
+        # --- 基本 ---
+        print('palette c_edge   heat10 .2')
+        print('palette c_vertex heat20 .9')
 
-        self.state = 'S'
-        self.time_state_changed = None
+        # S（健康）青
+        print('palette c_sus_range heat20 .3')
+        print('palette c_sus       heat20 .9')
 
-        # 最初の感染者
-        if self.id_ == 1:
-            self.state = 'I'
-            self.time_state_changed = self.scheduler.time
+        # メッセージ保持（黄色）
+        print('palette c_inf_range heat80 .3')
+        print('palette c_inf       heat80 .9')
 
-    def update_state(self, new_state):
-        self.state = new_state
-        self.time_state_changed = self.scheduler.time
-        self.monitor.change_agent_status(self)
+        # 待機
+        print('palette c_wait_sus_range heat20 .3')
+        print('palette c_wait_sus       heat20 .9')
 
-    def recvmsg(self, agent, msg):
-        super().recvmsg(agent, msg)
-        if self.state == 'S':
-            self.update_state('I')
+        # I（感染）赤
+        print('palette c_zombie       red .9')
+        print('palette c_zombie_range red .3')
 
-    def get_all_neighbors(self):
-        neighbors = []
-        p = self.mobility.current
-        for agent in self.scheduler.agents:
-            if agent.id_ == self.id_: 
-                continue
-            q = agent.mobility.current
-            if (p[0]-q[0])**2 + (p[1]-q[1])**2 <= self.range_**2:
-                neighbors.append(agent)
-        return neighbors
+        # R（免疫）緑
+        print('palette c_rec       green .9')
+        print('palette c_rec_range green .3')
 
-    def forward(self):
-        now = self.scheduler.time
+    def close(self):
+        pass
 
-        # ---------- 状態遷移 ----------
-        if self.state == 'I':
-            if now - self.time_state_changed >= self.INFECT_TIME:
-                self.update_state('R')
-                return
-
-        if self.state == 'R':
-            if now - self.time_state_changed >= self.IMMUNE_TIME:
-                self.update_state('S')
-                return
-
-        # ---------- 感染行動 ----------
-        if self.state != 'I':
+    def display_path(self, path):
+        graph = path.graph
+        if not graph:
             return
+        for v in sorted(graph.vertices()):
+            p = graph.get_vertex_attribute(v, 'xy')
+            x, y = to_geometry(p[0]), to_geometry(p[1])
+            print(f'define v{v} ellipse 2 2 c_vertex {x} {y}')
+        for u, v in graph.edges():
+            print(f'define - link v{u} v{v} 1 c_edge')
+        print('fix /./')
 
-        viruses = self.messages()
-        if not viruses:
-            dummy = f"{self.id_}-0-9999"
-            self.received[dummy] += 1
-            viruses = [dummy]
+    def change_agent_status(self, agent):
+        id_ = agent.id_
 
-        for agent in self.get_all_neighbors():
-            if hasattr(agent, 'state') and agent.state != 'S':
-                continue
-            if random.random() < self.INFECTION_RATE:
-                for msg in viruses:
-                    if msg not in agent.received:
-                        self.sendmsg(agent, msg)
+        # デフォルト（青）
+        color = 'c_sus'
+        if agent.mobility.wait:
+            color = 'c_wait_sus'
+        if agent.received or agent.receive_queue:
+            color = 'c_inf'
 
-    def advance(self):
-        self.mobility.move(self.scheduler.delta)
-        self.monitor.move_agent(self)
-        self.forward()
+        # ---- SIR 優先 ----
+        if hasattr(agent, 'state'):
+            if agent.state == 'I':
+                color = 'c_zombie'   # 赤
+            elif agent.state == 'R':
+                color = 'c_rec'      # 緑
+            elif agent.state == 'S':
+                color = 'c_sus'      # 青
+
+        print(f'color agent{id_} {color}')
+
+        if '_sus' in color or '_inf' in color or '_zombie' in color or '_rec' in color:
+            print(f'color agentr{id_} {color}_range')
+        else:
+            print(f'color agentr{id_} {color}')
+
+    def display_agents(self):
+        for agent in self.scheduler.agents:
+            id_ = agent.id_
+            p = agent.mobility.current
+            x, y = to_geometry(p[0]), to_geometry(p[1])
+            r = to_geometry(agent.range_)
+            print(f'define agent{id_} ellipse 4 4 white {x} {y}')
+            print(f'define agentr{id_} ellipse {r} {r} white {x} {y}')
+            self.change_agent_status(agent)
+
+    def move_agent(self, agent):
+        id_ = agent.id_
+        p = agent.mobility.current
+        x, y = to_geometry(p[0]), to_geometry(p[1])
+        print(f'move agent{id_} {x} {y}')
+        print(f'move agentr{id_} {x} {y}')
+        self.change_agent_status(agent)
+
+    def display_status(self):
+        time = float2str(self.scheduler.time, '10.2f')
+        print(f'define status_l text Time:{time} 14 white 0.5 0.05')
+
+    def update(self):
+        print('display')
