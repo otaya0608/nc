@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# epidemic.py - SIRS（再感染可能・感染が止まらない完全版）
+# epidemic.py - SIRS（可視化対応・再感染可能）
 
 import random
 from dtnsim.agent.carryonly import CarryOnly
@@ -15,6 +15,7 @@ class Epidemic(CarryOnly):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        # 状態: S / I / R
         self.state = 'S'
         self.time_state_changed = None
 
@@ -26,16 +27,13 @@ class Epidemic(CarryOnly):
 
 
     # -------------------------
-    # 状態遷移ヘルパ
+    # 状態遷移ユーティリティ
     # -------------------------
     def enter_infected(self):
-        """
-        I 状態に入るときは必ずウイルスを持たせる
-        """
+        """I 状態に入るときは必ずウイルスを持たせる"""
         self.state = 'I'
         self.time_state_changed = self.scheduler.time
 
-        # ★ 必須：ウイルスを生成
         dummy = f"{self.id_}-0-9999"
         self.received[dummy] += 1
 
@@ -46,7 +44,7 @@ class Epidemic(CarryOnly):
         self.state = new_state
         self.time_state_changed = self.scheduler.time
 
-        # 免疫 → 健康 に戻るときは履歴を消す
+        # ★ R → S のときに感染履歴を消す（再感染可能にする）
         if new_state == 'S':
             self.received.clear()
 
@@ -60,7 +58,7 @@ class Epidemic(CarryOnly):
         super().recvmsg(agent, msg)
 
         if self.state == 'S':
-            # ★ S → I のときも必ずウイルスを持たせる
+            # ★ S → I のときも必ずウイルスを生成
             self.enter_infected()
 
 
@@ -71,7 +69,6 @@ class Epidemic(CarryOnly):
         for agent in self.scheduler.agents:
             if agent.id_ == self.id_:
                 continue
-
             q = agent.mobility.current
             if (p[0] - q[0])**2 + (p[1] - q[1])**2 <= self.range_**2:
                 neighbors.append(agent)
@@ -93,13 +90,11 @@ class Epidemic(CarryOnly):
                 self.update_state('S')
                 return
 
-        # ---------- 感染行動 ----------
+        # ---------- 感染行動（赤のみ） ----------
         if self.state != 'I':
             return
 
         viruses = self.messages()
-
-        # 念のための保険（基本は不要だが安全）
         if not viruses:
             dummy = f"{self.id_}-0-9999"
             self.received[dummy] += 1
