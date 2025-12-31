@@ -1,29 +1,23 @@
 #!/usr/bin/env python3
-# epidemic.py - SIR（初期感染あり・完全版）
+# epidemic.py - SIRS（初期感染あり・完全版）
 import random
 from dtnsim.agent.carryonly import CarryOnly
 
 class Epidemic(CarryOnly):
-    INFECTION_RATE = 1.0   # 接触したら必ず感染
-
-    INFECT_TIME = 1000.0     # 赤(I) → 緑(R)
-    IMMUNE_TIME = 5000.0     # 緑(R) → 青(S)
+    INFECTION_RATE = 1.0    # sweepで変える対象
+    INFECT_TIME    = 1000.0 # I -> R
+    IMMUNE_TIME    = 18000.0 # R -> S
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        # 状態: S / I / R
         self.state = 'S'
         self.time_state_changed = None
 
-        # =========================
-        # 最初の1人を感染者にする
-        # =========================
+        # 初期感染者
         if self.id_ == 1:
             self.state = 'I'
             self.time_state_changed = self.scheduler.time
-
-            # ★ 重要：最初からウイルスを1個持たせる
             dummy = f"{self.id_}-0-9999"
             self.received[dummy] += 1
 
@@ -31,9 +25,10 @@ class Epidemic(CarryOnly):
         self.state = new_state
         self.time_state_changed = self.scheduler.time
 
-        if new_state =='S':
+        # Sに戻ったらウイルスを消す（再感染可能にする）
+        if new_state == 'S':
             self.received.clear()
-        
+
         self.monitor.change_agent_status(self)
 
     def recvmsg(self, agent, msg):
@@ -41,47 +36,36 @@ class Epidemic(CarryOnly):
         if self.state == 'S':
             self.update_state('I')
 
-    def get_all_neighbors(self):
-        neighbors = []
-        p = self.mobility.current
-        for agent in self.scheduler.agents:
-            if agent.id_ == self.id_:
-                continue
-                neighbors.append(agent)
-        return neighbors
-
     def forward(self):
         now = self.scheduler.time
 
-        # ---------- 状態遷移 ----------
-        if self.state == 'I':
-            if now - self.time_state_changed >= self.INFECT_TIME:
-                self.update_state('R')
-                return
+        # 状態遷移
+        if self.state == 'I' and now - self.time_state_changed >= self.INFECT_TIME:
+            self.update_state('R')
+            return
 
-        if self.state == 'R':
-            if now - self.time_state_changed >= self.IMMUNE_TIME:
-                self.update_state('S')
-                return
+        if self.state == 'R' and now - self.time_state_changed >= self.IMMUNE_TIME:
+            self.update_state('S')
+            return
 
-        # ---------- 感染行動（赤のみ） ----------
+        # 感染行動（Iのみ）
         if self.state != 'I':
             return
 
         viruses = self.messages()
         if not viruses:
-            # 念のための保険（通常は初期化で入っている）
             dummy = f"{self.id_}-0-9999"
             self.received[dummy] += 1
             viruses = [dummy]
 
-        for agent in self.get_all_neighbors():
-            if hasattr(agent, 'state') and agent.state != 'S':
+        # CarryOnly の近傍検知を使う（安定）
+        for other in self.neighbors():
+            if hasattr(other, 'state') and other.state != 'S':
                 continue
             if random.random() < self.INFECTION_RATE:
                 for msg in viruses:
-                    if msg not in agent.received:
-                        self.sendmsg(agent, msg)
+                    if msg not in other.received:
+                        self.sendmsg(other, msg)
 
     def advance(self):
         self.mobility.move(self.scheduler.delta)
