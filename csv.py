@@ -1,71 +1,91 @@
 #!/usr/bin/env python3
 import csv
-import numpy as np
+import subprocess
+import statistics
 
-from dtnsim.simulator import Simulator
-from dtnsim.scheduler.simple import SimpleScheduler
-from dtnsim.mobility.randomwalk import RandomWalk
-from dtnsim.monitor.null import Null
-from epidemic import Epidemic
+# ==== 実験パラメータ ====
+P_START = 0.0
+P_END   = 1.0
+P_STEP  = 0.05
 
-# =====================
-# 実験パラメータ
-# =====================
-P_LIST = np.arange(0.0, 1.01, 0.05)
-N_TRIALS = 20
+TRIALS = 20
+
+# dtnsim の時間（あなたの -L で止まる前提）
 T_END = 200000
 
-N_AGENT = 50
-FIELD = 1000
-RANGE = 50
+# 「最後の何割でI>0なら持続」と判定するか
+TAIL_FRAC = 0.10
 
-# =====================
-def run_once(P):
-    Epidemic.INFECTION_RATE = P
+# dtnsim コマンド（あなたの実行形に合わせる）
+BASE_CMD = [
+    "dtnsim",
+    "-s", "2",
+    "-n", "20",
+    "-m", "RandomWaypoint",
+    "-p", "NONE",
+    "-a", "Epidemic",
+    "-c", "NONE",
+    f"-L{T_END}",
+]
 
-    sim = Simulator()
-    scheduler = SimpleScheduler(sim, delta=100)
-    monitor = Null(sim)
+def parse_stat(stderr_text: str):
+    # (time, I) の配列にする
+    out = []
+    for line in stderr_text.splitlines():
+        if not line.startswith("STAT "):
+            continue
+        _, t, I = line.split()
+        out.append((float(t), int(I)))
+    return out
 
-    for i in range(N_AGENT):
-        mob = RandomWalk(field=FIELD)
-        Epidemic(
-            scheduler=scheduler,
-            mobility=mob,
-            monitor=monitor,
-            range_=RANGE
-        )
+def is_persistent(stats):
+    if not stats:
+        return False
+    t_max = max(t for t, _ in stats)
+    t_thr = t_max * (1.0 - TAIL_FRAC)
+    # 後半区間でI>0が1回でもあれば「持続」
+    for t, I in stats:
+        if t >= t_thr and I > 0:
+            return True
+    return False
 
-    infected_persist = False
+def frange(a, b, step):
+    x = a
+    # 浮動小数の誤差対策
+    while x <= b + 1e-12:
+        yield round(x, 10)
+        x += step
 
-    while scheduler.time < T_END:
-        scheduler.advance()
+def run_one(p):
+    env = dict(**subprocess.os.environ)
+    env["INFECTION_RATE"] = str(p)
+    env["STAT_LOG"] = "1"
 
-        # 後半10%で感染者が存在するか
-        if scheduler.time > T_END * 0.9:
-            I = sum(1 for a in scheduler.agents if getattr(a, 'state', None) == 'I')
-            if I > 0:
-                infected_persist = True
-                break
+    r = subprocess.run(
+        BASE_CMD,
+        env=env,
+        stdout=subprocess.DEVNULL,  # 出力不要
+        stderr=subprocess.PIPE,      # STATはstderrに来る
+        text=True
+    )
 
-    return infected_persist
-
+    stats = parse_stat(r.stderr)
+    return is_persistent(stats), stats
 
 def main():
-    with open('threshold_result.csv', 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(['P', 'persist_rate'])
+    with open("persist_rate.csv", "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["P", "persist_rate", "trials"])
 
-        for P in P_LIST:
-            count = 0
-            for _ in range(N_TRIALS):
-                if run_once(P):
-                    count += 1
+        for p in frange(P_START, P_END, P_STEP):
+            pers = 0
+            for _ in range(TRIALS):
+                ok, _stats = run_one(p)
+                if ok:
+                    pers += 1
+            rate = pers / TRIALS
+            print(f"P={p:.3f} persist_rate={rate:.3f} ({pers}/{TRIALS})")
+            w.writerow([p, rate, TRIALS])
 
-            rate = count / N_TRIALS
-            print(f'P={P:.2f}  persist={rate:.2f}')
-            writer.writerow([P, rate])
-
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
