@@ -1,73 +1,57 @@
 #!/usr/bin/env python3
-# epidemic.py - SIRS（初期感染あり・完全版）
-import random
-from dtnsim.agent.carryonly import CarryOnly
+# null.py - 可視化なし + 統計(STAT)出力用
+import os
+import sys
 
-class Epidemic(CarryOnly):
-    INFECTION_RATE = 1.0    # sweepで変える対象
-    INFECT_TIME    = 1000.0 # I -> R
-    IMMUNE_TIME    = 18000.0 # R -> S
+class Null:
+    def __init__(self, scheduler=None):
+        # dtnsim 側から scheduler が注入される前提
+        self.scheduler = scheduler
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def open(self):
+        pass
 
-        self.state = 'S'
-        self.time_state_changed = None
+    def close(self):
+        pass
 
-        # 初期感染者
-        if self.id_ == 1:
-            self.state = 'I'
-            self.time_state_changed = self.scheduler.time
-            dummy = f"{self.id_}-0-9999"
-            self.received[dummy] += 1
+    def display_path(self, path):
+        pass
 
-    def update_state(self, new_state):
-        self.state = new_state
-        self.time_state_changed = self.scheduler.time
+    def display_agents(self):
+        pass
 
-        # Sに戻ったらウイルスを消す（再感染可能にする）
-        if new_state == 'S':
-            self.received.clear()
+    def move_agent(self, agent):
+        pass
 
-        self.monitor.change_agent_status(self)
+    def display_forward(self, a, b, msg):
+        pass
 
-    def recvmsg(self, agent, msg):
-        super().recvmsg(agent, msg)
-        if self.state == 'S':
-            self.update_state('I')
+    def change_agent_status(self, agent):
+        pass
 
-    def forward(self):
-        now = self.scheduler.time
+    def display_status(self):
+        pass
 
-        # 状態遷移
-        if self.state == 'I' and now - self.time_state_changed >= self.INFECT_TIME:
-            self.update_state('R')
+    def update(self):
+        """
+        dtnsim の各ステップで呼ばれる想定。
+        STAT_LOG=1 のときだけ、感染者数を stderr に出す。
+        stdout は汚さない（Illegal command 回避）。
+        """
+        if os.getenv("STAT_LOG", "0") != "1":
             return
 
-        if self.state == 'R' and now - self.time_state_changed >= self.IMMUNE_TIME:
-            self.update_state('S')
+        # scheduler が未セットなら何もしない
+        if self.scheduler is None:
             return
 
-        # 感染行動（Iのみ）
-        if self.state != 'I':
-            return
+        I = 0
+        for a in self.scheduler.agents:
+            if hasattr(a, "state") and a.state == "I":
+                I += 1
 
-        viruses = self.messages()
-        if not viruses:
-            dummy = f"{self.id_}-0-9999"
-            self.received[dummy] += 1
-            viruses = [dummy]
-
-        # CarryOnly の近傍検知を使う（安定）
-        for other in self.neighbors():
-            if hasattr(other, 'state') and other.state != 'S':
-                continue
-            if random.random() < self.INFECTION_RATE:
-                for msg in viruses:
-                    if msg not in other.received:
-                        self.sendmsg(other, msg)
-
-    def advance(self):
-        self.mobility.move(self.scheduler.delta)
-        self.monitor.move_agent(self)
-        self.forward()
+        try:
+            sys.stderr.write(f"STAT {self.scheduler.time} {I}\n")
+            sys.stderr.flush()
+        except BrokenPipeError:
+            sys.exit(0)
