@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# epidemic.py - SIRS（初期感染あり・完全版 + 確率env反映(毎回) + DBG）
+# epidemic.py - SIRS（初期感染あり・完全版 + 確率env反映(毎回) + DBG(env_val確認)）
 import os
 import sys
 import random
@@ -57,31 +57,40 @@ class Epidemic(CarryOnly):
         if self.state != 'I':
             return
 
-        # ★ここで毎回 env から感染確率を読む（確実に反映）
+        # 近傍取得（DBGでneis数を出したいので先に取る）
+        neis = self.neighbors()
+
+        # ★ env の生値（文字列）をまず取る
+        env_val = os.getenv("INFECTION_RATE", None)
+
+        # ★ env を優先して rate を作る（失敗したらデフォルトに落とす）
         try:
-            rate = float(os.getenv("INFECTION_RATE", str(self.INFECTION_RATE)))
+            if env_val is None:
+                rate = float(self.INFECTION_RATE)
+            else:
+                rate = float(env_val)
         except ValueError:
-            rate = self.INFECTION_RATE
+            rate = float(self.INFECTION_RATE)
+
+        # --- DBG（患者0だけ、50刻みで出す）---
+        # ここで env_val が None なのか '0.80' なのかが確実に見える
+        if self.id_ == 1:
+            t_int = int(now)
+            if t_int % 50 == 0 and t_int != self._dbg_last_t:
+                self._dbg_last_t = t_int
+                try:
+                    sys.stderr.write(
+                        f"DBG t={now} neis={len(neis)} env_val={env_val!r} rate={rate}\n"
+                    )
+                    sys.stderr.flush()
+                except BrokenPipeError:
+                    sys.exit(0)
 
         viruses = self.messages()
         if not viruses:
             dummy = f"{self.id_}-0-9999"
             self.received[dummy] += 1
             viruses = [dummy]
-
-        # 近傍取得
-        neis = self.neighbors()
-
-        # --- DBG（患者0だけ、50刻みで出す）---
-        if self.id_ == 1:
-            t_int = int(now)
-            if t_int % 50 == 0 and t_int != self._dbg_last_t:
-                self._dbg_last_t = t_int
-                try:
-                    sys.stderr.write(f"DBG t={now} neis={len(neis)} rate={rate}\n")
-                    sys.stderr.flush()
-                except BrokenPipeError:
-                    sys.exit(0)
 
         # --- 感染ばらまき ---
         for other in neis:
