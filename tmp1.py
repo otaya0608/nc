@@ -8,8 +8,9 @@ class StatNull(Null):
         self.interval = 50
         self._last_t = -1
 
-    def update(self):
+    def display_status(self):
         t = int(self.scheduler.time)
+
         if t == self._last_t:
             return
         self._last_t = t
