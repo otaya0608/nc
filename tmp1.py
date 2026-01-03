@@ -43,6 +43,15 @@ class Epidemic(CarryOnly):
 
     def forward(self):
         now = self.scheduler.time
+        sys.stderr.write("DBG_HELLO\n"); sys.stderr.flush()
+        if self.id_ == 1 and self._dbg_last_t == -1:
+            self._dbg_last_t = -2
+            sys.stderr.write("ENV_DUMP_BEGIN\n")
+            sys.stderr.write(f"ENV_INFECTION_RATE={os.environ.get('INFECTION_RATE')!r}\n")
+            sys.stderr.write(f"ENV_KEYS_HAS_INFECTION_RATE={'INFECTION_RATE' in os.environ}\n")
+            sys.stderr.write("ENV_DUMP_END\n")
+            sys.stderr.flush()
+
 
         # --- 状態遷移 ---
         if self.state == 'I' and now - self.time_state_changed >= self.INFECT_TIME:
