@@ -8,6 +8,10 @@ class StatNull(Null):
         self.interval = 50
         self._last_t = -1
 
+    def update(self):
+        # ← これが無いと display_status が呼ばれない
+        self.display_status()
+
     def display_status(self):
         t = int(self.scheduler.time)
 
