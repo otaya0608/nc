@@ -8,7 +8,7 @@ P_START = 0.0
 P_END   = 1.0
 P_STEP  = 0.05
 
-TRIALS = 20
+TRIALS = 5
 
 # dtnsim の時間（あなたの -L で止まる前提）
 T_END = 200000
@@ -19,13 +19,12 @@ TAIL_FRAC = 0.10
 # dtnsim コマンド（あなたの実行形に合わせる）
 BASE_CMD = [
     "dtnsim",
-    "-s", "2",
-    "-n", "20",
+    "-s", "1",
+    "-n", "50",
     "-m", "RandomWaypoint",
     "-p", "NONE",
     "-a", "Epidemic",
-    "-c", "NONE",
-    f"-L{T_END}",
+    "-M", "StatNull",
 ]
 
 def parse_stat(stderr_text: str):
