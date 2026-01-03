@@ -1,26 +1,20 @@
 #!/usr/bin/env python3
-import csv
+import os
 import subprocess
-import statistics
 
-# ==== 実験パラメータ ====
-P_START = 0.0
-P_END   = 1.0
-P_STEP  = 0.05
+# ====== まずは死なない設定（ここ重要） ======
+P_VALUES = [0.0, 0.2, 0.4, 0.6, 0.8, 1.0]  # まず粗く確認
+TRIALS = 1                                 # まず1回で動作確認
+TAIL_FRAC = 0.20                           # 後半20%で判定
 
-TRIALS = 5
+# dtnsimを軽くする（ここを小さくするとSIGKILLしにくい）
+N_AGENTS = 20
+SEED_BASE = 1
 
-# dtnsim の時間（あなたの -L で止まる前提）
-T_END = 200000
-
-# 「最後の何割でI>0なら持続」と判定するか
-TAIL_FRAC = 0.10
-
-# dtnsim コマンド（あなたの実行形に合わせる）
 BASE_CMD = [
     "dtnsim",
     "-s", "1",
-    "-n", "50",
+    "-n", str(N_AGENTS),
     "-m", "RandomWaypoint",
     "-p", "NONE",
     "-a", "Epidemic",
@@ -28,63 +22,70 @@ BASE_CMD = [
 ]
 
 def parse_stat(stderr_text: str):
-    # (time, I) の配列にする
     out = []
     for line in stderr_text.splitlines():
         if not line.startswith("STAT "):
             continue
-        _, t, I = line.split()
-        out.append((float(t), int(I)))
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        # STAT <time> <I>
+        t = float(parts[1])
+        I = int(parts[2])
+        out.append((t, I))
     return out
 
 def is_persistent(stats):
     if not stats:
         return False
-    t_max = max(t for t, _ in stats)
+    t_max = stats[-1][0]
     t_thr = t_max * (1.0 - TAIL_FRAC)
-    # 後半区間でI>0が1回でもあれば「持続」
     for t, I in stats:
         if t >= t_thr and I > 0:
             return True
     return False
 
-def frange(a, b, step):
-    x = a
-    # 浮動小数の誤差対策
-    while x <= b + 1e-12:
-        yield round(x, 10)
-        x += step
-
-def run_one(p):
-    env = dict(**subprocess.os.environ)
+def run_one(p, seed):
+    env = os.environ.copy()
     env["INFECTION_RATE"] = str(p)
     env["STAT_LOG"] = "1"
 
+    # seedを変えるなら -s を差し替える（dtnsimの引数は配列なので安全）
+    cmd = BASE_CMD.copy()
+    cmd[cmd.index("-s") + 1] = str(seed)
+
     r = subprocess.run(
-        BASE_CMD,
+        cmd,
         env=env,
-        stdout=subprocess.DEVNULL,  # 出力不要
-        stderr=subprocess.PIPE,      # STATはstderrに来る
-        text=True
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=60,  # ← ここ超重要：無限に重くなる前に止める
     )
 
     stats = parse_stat(r.stderr)
     return is_persistent(stats), stats
 
 def main():
-    with open("persist_rate.csv", "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["P", "persist_rate", "trials"])
+    print("P,trial,persist,last_t,last_I")
 
-        for p in frange(P_START, P_END, P_STEP):
-            pers = 0
-            for _ in range(TRIALS):
-                ok, _stats = run_one(p)
-                if ok:
-                    pers += 1
-            rate = pers / TRIALS
-            print(f"P={p:.3f} persist_rate={rate:.3f} ({pers}/{TRIALS})")
-            w.writerow([p, rate, TRIALS])
+    for p in P_VALUES:
+        for k in range(TRIALS):
+            seed = SEED_BASE + k
+            try:
+                ok, stats = run_one(p, seed)
+            except subprocess.TimeoutExpired:
+                # 重くて終わらないときはこの試行は「不明」扱いにして表示
+                print(f"{p},{k+1},TIMEOUT,NA,NA")
+                continue
+
+            if not stats:
+                print(f"{p},{k+1},NO_STAT,NA,NA")
+                continue
+
+            last_t, last_I = stats[-1]
+            persist = 1 if ok else 0
+            print(f"{p},{k+1},{persist},{int(last_t)},{last_I}")
 
 if __name__ == "__main__":
     main()
